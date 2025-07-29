@@ -9,7 +9,7 @@ import skimage.morphology
 import habitat
 import cv2
 import magnum as mn
-import Quaternion
+# import Quaternion
 from tqdm import tqdm
 # from base_env import base_env
 from lightglue import LightGlue, SuperPoint, DISK
@@ -68,7 +68,7 @@ class NiceEnv(base_env):
         if self.similarity_method == 1:
             self.extractor = DISK(max_num_keypoints=2048).eval().to(self.device)
             self.matcher = LightGlue(features='disk').eval().to(self.device)
-            self.matcher.compile(mode='reduce-overhead')
+            # self.matcher.compile(mode='reduce-overhead')
 
 
 
