@@ -241,11 +241,35 @@ def observations_to_image(observation: Dict, info: Dict) -> np.ndarray:
     if "collisions" in info and info["collisions"]["is_collision"]:
         render_frame = draw_collision(render_frame)
 
+    # Look for top_down_map or reconstruct from flattened frontier_exploration_map data
+    map_data = None
     if "top_down_map" in info:
-        top_down_map = maps.colorize_draw_agent_and_fit_to_height(
-            info["top_down_map"], render_frame.shape[0]
-        )
-        render_frame = np.concatenate((render_frame, top_down_map), axis=1)
+        map_data = info["top_down_map"]
+    elif "frontier_exploration_map" in info:
+        map_data = info["frontier_exploration_map"]
+    else:
+        # Check for flattened frontier_exploration_map data
+        frontier_keys = [k for k in info.keys() if k.startswith("frontier_exploration_map.")]
+        if frontier_keys:
+            # Reconstruct the nested structure
+            map_data = {}
+            for key in frontier_keys:
+                # Remove the "frontier_exploration_map." prefix
+                nested_key = key.replace("frontier_exploration_map.", "")
+                map_data[nested_key] = info[key]
+    
+    if map_data is not None:
+        try:
+            # Verify we have the required keys
+            required_keys = ["map", "agent_map_coord", "agent_angle"]
+            if all(key in map_data for key in required_keys):
+                top_down_map = maps.colorize_draw_agent_and_fit_to_height(
+                    map_data, render_frame.shape[0]
+                )
+                render_frame = np.concatenate((render_frame, top_down_map), axis=1)
+        except Exception:
+            # Silently skip if there's an error processing the map
+            pass
     return render_frame
 
 

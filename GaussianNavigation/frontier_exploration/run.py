@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
+export JUNK=
 The following command works:
-python frontier_exploration/run.py --run-type eval --exp-config configs/exp_objnav.yaml -d habitat_baselines.eval.should_load_ckpt=False
+python frontier_exploration/run.py --run-type eval --exp-config configs/exploration.yaml -d habitat_baselines.eval.should_load_ckpt=False
 """
 import argparse
 import os

@@ -86,10 +86,17 @@ def _make_env_func(config, dataset=None, rank=0):
     """
     with habitat.config.read_write(config):
         config.habitat.simulator.scene = dataset.episodes[0].scene_id
+    
     env_name = config.end2end_imagenav.env_name
     if env_name == 'instance_imagenav':
         from vector_env.envs.instance_imagenav_env import NiceEnv
-    env = NiceEnv(config_env=config, dataset=dataset, rank=rank)
+        env = NiceEnv(config_env=config, dataset=dataset, rank=rank)
+    elif env_name == 'frontier_exploration':
+        from vector_env.envs.frontier_exploration_env import FrontierExplorationEnv
+        env = FrontierExplorationEnv(config_env=config, dataset=dataset, rank=rank)
+    else:
+        raise ValueError(f"Unknown environment name: {env_name}")
+    
     env.seed(config.habitat.seed + rank)
     return env
 

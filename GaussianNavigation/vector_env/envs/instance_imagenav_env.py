@@ -158,7 +158,7 @@ class NiceEnv(base_env):
         # visualize goal position
         if self.viz:
             vis_map = map_struct['vis_map']
-            goal_pos_w_map = self.from_env_to_map(self.pred_goal_pos)
+            goal_pos_w_map = self.from_env_to_map(self.min_viewpoint_goal_w_env)
             vis_map[20:500, 40+360:400+480][goal_pos_w_map[0]*2-5:goal_pos_w_map[0]*2+5, \
                                             goal_pos_w_map[1]*2-5:goal_pos_w_map[1]*2+5] = [255, 0, 0]
             self.viz_obs.append(vis_map)

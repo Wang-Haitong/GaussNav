@@ -63,6 +63,7 @@ class FrontierExplorationMap(TopDownMap):
         self._is_feasible: bool = True
         self._static_metrics: Dict[str, Any] = {}  # only updated once per episode
         self._task = task
+        self._step_counter = 0  # Counter for saving maps every N steps
 
     def reset_metric(
         self, episode: NavigationEpisode, *args: Any, **kwargs: Any
@@ -70,6 +71,7 @@ class FrontierExplorationMap(TopDownMap):
         assert "task" in kwargs, "task must be passed to reset_metric!"
         self._explorer_sensor = kwargs["task"].sensor_suite.sensors[self._explorer_uuid]
         self._static_metrics = {}
+        self._step_counter = 0  # Reset step counter for new episode
         super().reset_metric(episode, *args, **kwargs)
         if self._metric is None:  # v0.2.3 doesn't update self._metric in reset_metric
             self.update_metric(episode, None)
@@ -149,6 +151,10 @@ class FrontierExplorationMap(TopDownMap):
 
         # Update self._metric with the static metrics
         self._metric.update(self._static_metrics)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        # Use unique UUID - the video generation code reconstructs from flattened keys
+        return "frontier_exploration_map"
 
         if DEBUG:
             import time

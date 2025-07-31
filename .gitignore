@@ -7,3 +7,4 @@
 **/*.pyc
 
 GaussianNavigation/data
+GaussianNavigation/frontier_exploration/junk

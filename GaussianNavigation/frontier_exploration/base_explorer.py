@@ -7,8 +7,10 @@ import numpy as np
 from gym import Space, spaces
 from habitat import EmbodiedTask, Sensor, SensorTypes, registry
 from habitat.config.default_structured_configs import LabSensorConfig
+from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from habitat.sims.habitat_simulator.habitat_simulator import HabitatSim
 from habitat.tasks.nav.nav import TopDownMap
+from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 from habitat.utils.visualizations import maps
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig
@@ -19,7 +21,6 @@ from frontier_exploration.utils.path_utils import (
     a_star_search,
     completion_time_heuristic,
     euclidean_heuristic,
-    heading_error,
     path_dist_cost,
     path_time_cost,
 )
@@ -57,6 +58,14 @@ class BaseExplorer(Sensor):
         self._turn_angle = np.deg2rad(config.turn_angle)
         self._visibility_dist = config.visibility_dist
 
+        # Initialize ShortestPathFollower for better navigation
+        self._path_follower = ShortestPathFollower(
+            sim=sim,
+            goal_radius=self._success_distance,
+            return_one_hot=False,  # Return raw actions
+            stop_on_error=True
+        )
+
         # Public attributes are used by the FrontierExplorationMap measurement
         self.closest_frontier_waypoint = None
         self.top_down_map = None
@@ -71,7 +80,6 @@ class BaseExplorer(Sensor):
         self._agent_position = None
         self._agent_heading = None
         self._curr_ep_id = None
-        self._next_waypoint = None
         self._default_dir = None
         self._first_frontier = False  # whether frontiers have been found yet
 
@@ -89,7 +97,6 @@ class BaseExplorer(Sensor):
             self._visibility_dist
         )
         self.closest_frontier_waypoint = None
-        self._next_waypoint = None
         self._default_dir = None
         self._first_frontier = False
         self.inflection = False
@@ -126,9 +133,9 @@ class BaseExplorer(Sensor):
     @property
     def next_waypoint_pixels(self):
         # This property is used by the FrontierExplorationMap measurement
-        if self._next_waypoint is None:
-            return None
-        return self._map_coors_to_pixel(self._next_waypoint)
+        # NOTE: With ShortestPathFollower, we don't have intermediate waypoints
+        # So we return None to disable waypoint visualization
+        return None
 
     def get_observation(
         self, task: EmbodiedTask, episode, *args: Any, **kwargs: Any
@@ -176,13 +183,6 @@ class BaseExplorer(Sensor):
             if len(self.frontier_waypoints) > 0:
                 # frontiers are in (y, x) format, need to do some swapping
                 self.frontier_waypoints = self.frontier_waypoints[:, ::-1]
-
-    def _get_next_waypoint(self, goal: np.ndarray):
-        goal_3d = self._pixel_to_map_coors(goal) if len(goal) == 2 else goal
-        next_waypoint = get_next_waypoint(
-            self.agent_position, goal_3d, self._sim.pathfinder
-        )
-        return next_waypoint
 
     def _get_closest_waypoint(self):
         if len(self.frontier_waypoints) == 0:
@@ -247,19 +247,44 @@ class BaseExplorer(Sensor):
             return ActionIDs.STOP
         self._first_frontier = True
 
-        # Get next waypoint along the shortest path towards the selected frontier
-        # (target)
-        self._next_waypoint = self._get_next_waypoint(target)
-
-        # Determine which action is most suitable for reaching the next waypoint
-        action = determine_pointturn_action(
-            self.agent_position,
-            self._next_waypoint,
-            self.agent_heading,
-            self._turn_angle,
-        )
+        # Convert frontier pixel coordinates to 3D world coordinates
+        frontier_3d = self._pixel_to_map_coors(target)
+        # print(f"frontier_3d: {frontier_3d}")
+        # print(f"agent_position: {self.agent_position}")
+        # print(f"distance: {np.linalg.norm(self.agent_position - frontier_3d)}")
         
-        return action
+        # Use ShortestPathFollower to get the action
+        try:
+            habitat_action = self._path_follower.get_next_action(frontier_3d)
+            # print(f"habitat_action: {habitat_action}")
+            
+            # If ShortestPathFollower says STOP (frontier reached), continue exploring
+            if habitat_action == HabitatSimActions.stop:
+                # print("Reached frontier! Turning to look for new frontiers...")
+                # Turn to update fog of war and potentially find new frontiers
+                # Alternate direction to avoid getting stuck
+                if self._default_dir is None:
+                    self._default_dir = bool(random.getrandbits(1))
+                return ActionIDs.TURN_LEFT if self._default_dir else ActionIDs.TURN_RIGHT
+            
+            action = self._convert_habitat_action(habitat_action)
+            # print(f"converted_action: {action}")
+            return action
+        except Exception as e:
+            # print(f"ShortestPathFollower failed: {e}, turning to explore")
+            # Don't stop on error, turn to continue exploration
+            return ActionIDs.TURN_LEFT
+
+    def _convert_habitat_action(self, habitat_action):
+        """Convert HabitatSimActions to ActionIDs format"""
+        if habitat_action == HabitatSimActions.move_forward:
+            return ActionIDs.MOVE_FORWARD
+        elif habitat_action == HabitatSimActions.turn_left:
+            return ActionIDs.TURN_LEFT
+        elif habitat_action == HabitatSimActions.turn_right:
+            return ActionIDs.TURN_RIGHT
+        else:  # stop or other
+            return ActionIDs.STOP
 
     def _get_agent_pixel_coords(self) -> np.ndarray:
         return self._map_coors_to_pixel(self.agent_position)
@@ -300,32 +325,6 @@ class BaseExplorer(Sensor):
         )
         return np.array([a_x, a_y])
 
-
-def get_next_waypoint(
-    start: np.ndarray, goal: np.ndarray, pathfinder: "PathFinder"
-) -> np.ndarray:
-    shortest_path = habitat_sim.nav.ShortestPath()
-    shortest_path.requested_start = start
-    shortest_path.requested_end = goal
-    assert pathfinder.find_path(shortest_path), "No path found!"
-    next_waypoint = shortest_path.points[1]
-    return next_waypoint
-
-
-def determine_pointturn_action(
-    start: np.ndarray,
-    next_waypoint: np.ndarray,
-    agent_heading: np.ndarray,
-    turn_angle: float,
-) -> np.ndarray:
-    heading_err = heading_error(start, next_waypoint, agent_heading)
-    if heading_err > turn_angle:
-        return ActionIDs.TURN_RIGHT
-    elif heading_err < -turn_angle:
-        return ActionIDs.TURN_LEFT
-    return ActionIDs.MOVE_FORWARD
-
-
 @dataclass
 class BaseExplorerSensorConfig(LabSensorConfig):
     type: str = BaseExplorer.__name__
@@ -333,12 +332,12 @@ class BaseExplorerSensorConfig(LabSensorConfig):
     # frontier to be valid
     ang_vel: float = 10.0  # degrees per second
     area_thresh: float = 3.0  # square meters
-    forward_step_size: float = 0.25  # meters
+    forward_step_size: float = 0.1  # meters
     fov: int = 79
-    lin_vel: float = 0.25  # meters per second
+    lin_vel: float = 0.1  # meters per second
     map_resolution: int = 256
     minimize_time: bool = True
-    success_distance: float = 0.18  # meters
+    success_distance: float = 0.08  # meters
     turn_angle: float = 10.0  # degrees
     visibility_dist: float = 4.5  # in meters
 

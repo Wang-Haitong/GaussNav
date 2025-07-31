@@ -71,8 +71,19 @@ def overlay_frame(frame, info, additional=None):
     for k, v in flattened_info.items():
         if isinstance(v, str):
             lines.append(f"{k}: {v}")
+        elif isinstance(v, np.ndarray):
+            # Handle numpy arrays by showing shape and a summary
+            if v.size == 1:
+                lines.append(f"{k}: {v.item():.2f}")
+            elif v.size <= 10:
+                lines.append(f"{k}: {np.array_str(v, precision=2, suppress_small=True)}")
+            else:
+                lines.append(f"{k}: array{v.shape}")
         else:
-            lines.append(f"{k}: {v:.2f}")
+            try:
+                lines.append(f"{k}: {v:.2f}")
+            except (TypeError, ValueError):
+                lines.append(f"{k}: {v}")
     if additional is not None:
         lines.extend(additional)
 

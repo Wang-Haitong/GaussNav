@@ -28,6 +28,11 @@ habitat:
   environment:
     iterator_options:
       max_scene_repeat_steps: 50000
+  simulator:
+    turn_angle: 20
+    agents:
+      main_agent:
+        radius: 0.17
   task:
     success_reward: 2.5
     slack_reward: -1e-3
@@ -49,7 +54,8 @@ habitat_baselines:
   force_torch_single_threaded: True
 
   eval:
-    split: "val"
+    split: "val_mini"
+    video_option: ["disk"]  # Enable video generation to save maps
 
   rl:
 
